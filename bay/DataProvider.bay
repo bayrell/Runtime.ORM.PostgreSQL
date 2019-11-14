@@ -1,0 +1,549 @@
+/*!
+ *  Bayrell Runtime Library
+ *
+ *  (c) Copyright 2018-2019 "Ildar Bikmamatov" <support@bayrell.org>
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+namespace Runtime.ORM.PostgreSQL;
+
+use Runtime.CoreProvider;
+use Runtime.CoreStruct;
+use Runtime.RuntimeUtils;
+use Runtime.Annotations.IntrospectionClass;
+use Runtime.ORM.Annotations.CollectionType;
+use Runtime.ORM.Annotations.DictType;
+use Runtime.ORM.PostgreSQL.ConnectionDriver;
+use Runtime.ORM.PostgreSQL.DataResult;
+use Runtime.ORM.DataProviderInterface;
+use Runtime.ORM.OrmQuery;
+use Runtime.ORM.OrmResult;
+
+
+struct DataProvider extends CoreProvider implements DataProviderInterface
+{
+	string hostname = "";
+	string login = "";
+	string password = "";
+	string db = "";
+	string prefix = "";
+	int port = 5432;	
+	
+	
+	/**
+	 * Returns hash
+	 */
+	string getHash()
+	{
+		return this.hostname ~ "|" ~ this.port ~ "|" ~ this.login ~ "|" ~
+			this.password ~ "|" ~ this.db ~ "|" ~ this.prefix
+		;
+	}
+	
+	
+	
+	/**
+	 * Returns table name with prefix
+	 */
+	lambda string getTableName(string table_name, DataProvider provider)
+	{
+		return provider.prefix ~ table_name;
+	}
+	
+	
+	
+	/**
+	 * Convert value
+	 */
+	lambda primitive fromDatabaseValueWithAnnotations(Collection<CoreStruct> annotations, primitive value)
+	{
+		bool is_collection = false;
+		bool is_dict = false;
+		bool is_datetime = false;
+		
+		if (annotations != null)
+		{
+			for (int j=0; j<annotations.count(); j++)
+			{
+				CoreStruct annotation = annotations.item(j);
+				if (annotation instanceof CollectionType) is_collection = true;
+				if (annotation instanceof DictType) is_dict = true;
+			}
+		}
+		
+		if (is_collection or is_dict)
+		{
+			if (value != null)
+			{
+				value = RuntimeUtils::json_decode(value);
+			}
+		}
+		
+		return value;
+	}
+	
+	
+	
+	/**
+	 * Convert value
+	 */
+	lambda primitive fromDatabaseValue(string model_name, string field_name, primitive value)
+	{
+		if (model_name == "" or model_name == "Runtime.Dict") return value;
+		
+		IntrospectionClass class_info = RuntimeUtils::getClassIntrospection(model_name);
+		Collection<CoreStruct> annotations = class_info.fields.get(field_name, []);
+		
+		return static::fromDatabaseValueWithAnnotations(annotations, value);
+	}
+	
+	
+	
+	/**
+	 * Convert
+	 */
+	lambda primitive fromDatabase(Dict row, string model_name, bool as_model = false)
+	{
+		if (model_name == "" or model_name == "Runtime.Dict") return row;
+		
+		Map<primitive> res = new Map();
+		Collection<string> fields = row.keys();
+		IntrospectionClass class_info = RuntimeUtils::getClassIntrospection(model_name);
+		
+		for (int i=0; i<fields.count(); i++)
+		{
+			string field_name = fields.item(i);
+			primitive value = row.get(field_name, null);
+			Collection<CoreStruct> annotations = class_info.fields.get(field_name, []);
+			value = static::fromDatabaseValueWithAnnotations(annotations, value);
+			res.set(field_name, value);
+		}
+		
+		if (model_name != "" and as_model)
+		{
+			CoreStruct item = rtl::newInstance(model_name, [res]);
+			return item;
+		}
+		
+		return res.toDict();
+	}
+	
+	
+	
+	/**
+	 * Convert value
+	 */
+	lambda primitive toDatabaseValueWithAnnotations(Collection<CoreStruct> annotations, primitive value)
+	{
+		bool is_collection = false;
+		bool is_dict = false;
+		bool is_datetime = false;
+		
+		if (annotations != null)
+		{
+			for (int j=0; j<annotations.count(); j++)
+			{
+				CoreStruct annotation = annotations.item(j);
+				if (annotation instanceof CollectionType) is_collection = true;
+				if (annotation instanceof DictType) is_dict = true;
+			}
+		}
+		if (is_collection or is_dict)
+		{
+			if (value != null)
+			{
+				value = RuntimeUtils::json_encode(value);
+			}
+		}
+		
+		return value;
+	}
+	
+	
+	
+	/**
+	 * Convert value
+	 */
+	lambda primitive toDatabaseValue(string model_name, string field_name, primitive value)
+	{
+		if (model_name == "" or model_name == "Runtime.Dict") return value;
+		
+		IntrospectionClass class_info = RuntimeUtils::getClassIntrospection(model_name);
+		Collection<CoreStruct> annotations = class_info.fields.get(field_name, []);
+		
+		return static::toDatabaseValueWithAnnotations(annotations, value);
+	}
+	
+	
+	
+	/**
+	 * Convert
+	 */
+	lambda Dict toDatabase(Dict row, string model_name)
+	{
+		if (model_name == "" or model_name == "Runtime.Dict") return row;
+		
+		Map<primitive> res = new Map();
+		Collection<string> fields = row.keys();
+		IntrospectionClass class_info = RuntimeUtils::getClassIntrospection(model_name);
+		for (int i=0; i<fields.count(); i++)
+		{
+			string field_name = fields.item(i);
+			primitive value = row.get(field_name, null);
+			Collection<CoreStruct> annotations = class_info.fields.get(field_name, []);
+			value = static::toDatabaseValueWithAnnotations(annotations, value);
+			res.set(field_name, value);
+		}
+		
+		return res.toDict();
+	}
+	
+	
+	
+	/**
+	 * Get sql from query
+	 */
+	static list<string, Dict> getSql(OrmQuery q, DataProvider provider)
+	{
+		if (q.kind == OrmQuery::QUERY_SELECT)
+		{
+			string sql = "SELECT ";
+			Map params = new Map();
+			
+			/* Add fields */
+			if (q.fields != null) sql ~= rs::join(", ", q.fields);
+			
+			string table_name = q.table_name;
+			if (q.flag_prefix) table_name = static::getTableName(table_name, provider);
+			
+			/* Add from */
+			sql ~= " FROM " ~ table_name;
+			
+			/* Add table alias */
+			if (q.table_name_alias != "") sql ~= " AS " ~ q.table_name_alias;
+			
+			/* Add where */
+			if (q.where_str != "") sql ~= " WHERE " ~ q.where_str;
+			if (q.where_params != null)
+			{
+				q.where_params.each
+				(
+					void (primitive value, string key) use (params)
+					{
+						params.set(key, value);
+					}
+				);
+			}
+			
+			/* Add order */
+			if (q.order != "") sql ~= " ORDER BY " ~ q.order;
+			
+			return [sql, params.toDict()];
+		}
+		
+		if (q.kind == OrmQuery::QUERY_INSERT)
+		{
+			string sql = "INSERT INTO ";
+			Map params = new Map();
+			
+			string table_name = q.table_name;
+			if (q.prefix_table) table_name = static::getTableName(table_name, provider);
+			
+			/* Add from */
+			sql ~= table_name;
+			
+			/* Add table alias */
+			if (q.table_name_alias != "") sql ~= " AS " ~ q.table_name_alias;
+			
+			/* Add valuse */
+			if (q.values != "") 
+				sql ~= " (" ~ 
+					rs::join
+					(
+						", ", 
+						q.values.reduce
+						(
+							Vector (Vector<string> v, string key, primitive value) use (q, params)
+							{
+								if (not q.raw)
+								{
+									value = static::toDatabaseValue(q.model_name, key, value);
+								}
+								params.set(key, value);
+								return v.push(key);
+							},
+							new Vector()
+						)
+					) ~ ") "
+				;
+			
+			/* Add valuse */
+			if (q.values != "") 
+				sql ~= " VALUES (" ~ 
+					rs::join
+					(
+						", ", 
+						q.values.reduce
+						(
+							Vector (Vector<string> v, string key, primitive value) use (q, params)
+							{
+								if (not q.raw)
+								{
+									value = static::toDatabaseValue(q.model_name, key, value);
+								}
+								params.set(key, value);
+								return v.push(":" ~ key);
+							},
+							new Vector()
+						)
+					) ~ ") "
+				;
+			
+			/* Add Return ID */
+			if (q.return_last_insert_id)
+			{
+				sql ~= " RETURNING id";
+			}
+			
+			return [sql, params.toDict()];
+		}
+		
+		if (q.kind == OrmQuery::QUERY_UPDATE)
+		{
+			string sql = "UPDATE ";
+			Map params = new Map();
+			
+			string table_name = q.table_name;
+			if (q.prefix_table) table_name = static::getTableName(table_name, provider);
+			
+			/* Add from */
+			sql ~= table_name;
+			
+			/* Add table alias */
+			if (q.table_name_alias != "") sql ~= " AS " ~ q.table_name_alias;
+			
+			/* Add set */
+			if (q.values != "") 
+				sql ~= " SET " ~ 
+					rs::join
+					(
+						", ", 
+						q.values.reduce
+						(
+							Vector (Vector<string> v, string key, primitive value) use (q, params)
+							{
+								if (not q.raw)
+								{
+									value = static::toDatabaseValue(q.model_name, key, value);
+								}
+								params.set(key, value);
+								return v.push(key ~ "=:" ~ key);
+							},
+							new Vector()
+						)
+					);
+			
+			/* Add where */
+			if (q.where != "") sql ~= " WHERE " ~ q.where;
+			if (q.where_params != null)
+			{
+				q.where_params.each
+				(
+					void (string key, primitive value) use (params)
+					{
+						params.set(key, value);
+					}
+				);
+			}
+			
+			return [sql, params.toDict()];
+		}
+		
+		if (q.kind == OrmQuery::QUERY_DELETE)
+		{
+			string sql = "DELETE FROM ";
+			Map params = new Map();
+			
+			string table_name = q.table_name;
+			if (q.prefix_table) table_name = static::getTableName(table_name, provider);
+			
+			/* Add from */
+			sql ~= table_name;
+			
+			/* Add table alias */
+			if (q.table_name_alias != "") sql ~= " AS " ~ q.table_name_alias;
+			
+			/* Add where */
+			if (q.where != "") sql ~= " WHERE " ~ q.where;
+			if (q.where_params != null)
+			{
+				q.where_params.each
+				(
+					void (string key, primitive value) use (params)
+					{
+						params.set(key, value);
+					}
+				);
+			}
+			
+			return [sql, params.toDict()];
+		}
+		
+		return ["", {}];
+	}
+	
+	
+	
+	/**
+	 * Execute query
+	 */
+	static async OrmResult query(OrmQuery q, DataProvider provider)
+	{
+		/* Result */
+		OrmResult res = null;
+		
+		/* Get query */
+		list<string, Dict> arr = static::getSql(q, provider);
+		string sql = arr[0]; Dict params = arr[1];
+		
+		/* Create connection */
+		ConnectionDriver driver = @->getDriver("Runtime.ORM.PostgreSQL.ConnectionDriver");
+		
+		/* Execute query */
+		DataResult data = await driver.execute(provider, sql, params);
+		
+		/* Select query */
+		if (q.kind == OrmQuery::QUERY_SELECT)
+		{
+			/* Fetch data */
+			Collection<primitive> items = await data.fetchAll();
+			
+			/* Convert data */
+			if (not q.flag_raw)
+			{
+				items = items.map
+				(
+					primitive (primitive item) use (q) => static::fromDatabase(item, q.model_name, q.as_model)
+				);
+			}
+			
+			/* Get total values */
+			int total = items.count();
+			
+			/* Result */
+			res = new OrmResult
+			{
+				"items": items,
+				"total": total,
+			};
+		}
+		
+		/* Insert query */
+		else if (q.kind == OrmQuery::QUERY_INSERT)
+		{
+			int last_insert_id = 0;
+			if (q.return_last_insert_id)
+			{
+				primitive res = await data.fetch();
+				if (res != null)
+				{
+					last_insert_id = (int) res.get("id", 0);
+				}
+			}
+			
+			/* Result */
+			res = new OrmResult
+			{
+				"last_insert_id": last_insert_id,
+			};
+		}
+		
+		/* Realese connection */
+		await data.release();
+		
+		return res;
+	}
+	
+	
+	
+	/**
+	 * Execute raw query
+	 */
+	static async DataResult execute(string sql, Dict params, DataProvider provider)
+	{
+		/* Create connection */
+		ConnectionDriver driver = @->getDriver("Runtime.ORM.PostgreSQL.ConnectionDriver");
+		
+		/* Execute query */
+		DataResult data = await driver->execute(provider, sql, params);
+		
+		return data;
+	}
+	
+	
+	
+	/**
+	 * Execute select query
+	 */
+	static async Collection<CoreStruct> select(string sql, Dict params, DataProvider provider)
+	{
+		/* Execute query */
+		DataResult data = await static::execute(sql, params, provider);
+		
+		/* Fetch data */
+		Collection<CoreStruct> items = await data.fetchAll();
+		
+		/* Result */
+		return items;
+	}
+	
+	
+	
+	/**
+	 * Fetch one
+	 */
+	static async CoreStruct fetchOne(string sql, Dict params, DataProvider provider)
+	{
+		/* Create connection */
+		ConnectionDriver driver = @->getDriver("Runtime.ORM.PostgreSQL.ConnectionDriver");
+		
+		/* Execute query */
+		DataResult data = await driver->query(provider, sql, params);
+		CoreStruct res = await data.fetch();
+		
+		/* Realese connection */
+		await data.release();
+		
+		/* Result */
+		return res;
+	}
+	
+	
+	
+	/**
+	 * Insert record
+	 */
+	static async int insert(Dict insert, DataProvider provider)
+	{
+	}
+	
+	
+	
+	/**
+	 * Insert or update
+	 */
+	static async void insert_or_update(Dict insert, Dict update, DataProvider provider)
+	{
+	}
+}

@@ -1,0 +1,127 @@
+/*!
+ *  Bayrell Runtime Library
+ *
+ *  (c) Copyright 2018-2019 "Ildar Bikmamatov" <support@bayrell.org>
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+namespace Runtime.ORM.PostgreSQL;
+
+use Runtime.CoreDriver;
+use Runtime.lib;
+use Runtime.ORM.Exceptions.OrmException;
+use Runtime.ORM.PostgreSQL.Connection;
+use Runtime.ORM.PostgreSQL.DataProvider;
+use Runtime.ORM.PostgreSQL.DataResult;
+
+
+class ConnectionDriver extends CoreDriver
+{
+	
+	protected Vector<Connection> connections = new Vector();
+	
+	
+	/**
+	 * Execute query
+	 */
+	async DataResult execute(DataProvider provider, string sql, Dict params)
+	{
+		Connection con = await this.connect(provider);
+		DataResult data = this.executeSQL(con, sql, params);
+		return data;
+	}
+	
+	
+	
+	/**
+	 * Connect to database
+	 */
+	async bool connect(DataProvider provider)
+	{
+		Connection con = this.connections.findItem( lib::equalAttr("hash", provider.getHash()) );
+		if (con != null) return con;
+		
+		#switch
+		#case ifcode PHP then
+		
+		$db = null;
+		$last_error = "";
+		try
+		{
+			$str = 'pgsql:host='.$provider->hostname;
+			if ($provider->port !== null) $str .= ';port='.$provider->port;
+			if ($provider->db !== null) $str .= ';dbname='.$provider->db;
+			$db = new \PDO(
+				$str, $provider->login, $provider->password, 
+				array(
+					\PDO::ATTR_PERSISTENT => false
+				)
+			);
+			$db->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+		}
+		catch (\PDOException $e)
+		{
+			$last_error = 'Failed connected to database!';
+		}
+		catch (\Excepion $e)
+		{
+			$last_error = $e->getMessage();
+		}
+		
+		if ($last_error)
+		{
+			throw new \Runtime\ORM\Exceptions\OrmException($ctx, $last_error);
+		}
+		
+		$con = new Connection($ctx, $provider, $db);
+		
+		#endswitch
+		
+		this.connections.push(con);
+		return con;
+	}
+	
+	
+	
+	/**
+	 * Execute
+	 */
+	async DataResult executeSQL(Connection con, string sql, Dict params)
+	{
+		var cursor = null;
+		
+		#switch
+		#case ifcode PHP then
+		try
+		{
+			$cursor = $con->db->prepare($sql, array(\PDO::ATTR_CURSOR => \PDO::CURSOR_FWDONLY));
+			$cursor->execute($params->_getArr());
+		}
+		catch (\PDOException $e)
+		{
+			if ($e->getCode() == 23505)
+			{
+				throw new DuplicateException($ctx, $e->getMessage());
+			}
+			throw new \Runtime\ORM\Exceptions\OrmException
+			(
+				$ctx, $e->getMessage() . "\nQuery: " . $sql, $e->getCode()
+			);
+		}
+		#endswitch
+		
+		return new DataResult(cursor);
+	}
+	
+}

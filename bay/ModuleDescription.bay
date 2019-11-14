@@ -1,0 +1,104 @@
+/*!
+ *  Bayrell Runtime Library
+ *
+ *  (c) Copyright 2018-2019 "Ildar Bikmamatov" <support@bayrell.org>
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+namespace Runtime.ORM.PostgreSQL;
+
+use Runtime.Annotations.Driver;
+use Runtime.Annotations.Provider;
+use Runtime.Interfaces.AssetsInterface;
+use Runtime.Interfaces.ContextInterface;
+use Runtime.Interfaces.ModuleDescriptionInterface;
+use Runtime.ORM.PostgreSQL.ConnectionDriver;
+use Runtime.ORM.PostgreSQL.DataProvider;
+
+
+class ModuleDescription implements ModuleDescriptionInterface
+{
+	
+	
+	/**
+	 * Returns module name
+	 * @return string
+	 */
+	lambda string getModuleName() => "Runtime.ORM.PostgreSQL";
+	
+	
+	
+	/**
+	 * Returns module name
+	 * @return string
+	 */
+	lambda string getModuleVersion() => "0.8.0";
+	
+	
+	
+	/**
+	 * Returns required modules
+	 * @return Map<string, string>
+	 */
+	lambda Map<string> requiredModules() =>
+	{
+		'Runtime': '>0.3',
+		'Runtime.ORM': '*',
+	};
+	
+	
+	
+	/**
+	 * Returns enities
+	 */
+	lambda Collection<Dict> entities() => 
+	[
+		/* Declare DataProvider */
+		new Driver
+		{
+			"name": "Runtime.ORM.PostgreSQL.ConnectionDriver",
+			"value": classof ConnectionDriver,
+		},
+		
+		/* Declare DataProvider */
+		new Provider
+		{
+			"name": "Runtime.ORM.DataProviderInterface",
+			"value": classof DataProvider,
+		},
+	];
+	
+	
+	
+	/**
+	 * Returns module files load order
+	 * @return Collection<string>
+	 */
+	lambda Collection<string> assets() => 
+	[
+		"Runtime.ORM.PostgreSQL/Connection",
+		"Runtime.ORM.PostgreSQL/ConnectionDriver",
+		"Runtime.ORM.PostgreSQL/DataProvider",
+		"Runtime.ORM.PostgreSQL/DataResult",
+		"Runtime.ORM.PostgreSQL/ModuleDescription",
+	];
+	
+	
+	
+	/**
+	 * Returns sync loaded files
+	 */		
+	lambda Vector<string> resources() => null;
+	
+}
