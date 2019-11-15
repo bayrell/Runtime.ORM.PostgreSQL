@@ -258,7 +258,7 @@ struct DataProvider extends CoreProvider implements DataProviderInterface
 			Map params = new Map();
 			
 			string table_name = q.table_name;
-			if (q.prefix_table) table_name = static::getTableName(table_name, provider);
+			if (q.flag_prefix) table_name = static::getTableName(table_name, provider);
 			
 			/* Add from */
 			sql ~= table_name;
@@ -267,16 +267,16 @@ struct DataProvider extends CoreProvider implements DataProviderInterface
 			if (q.table_name_alias != "") sql ~= " AS " ~ q.table_name_alias;
 			
 			/* Add valuse */
-			if (q.values != "") 
+			if (q.data != "") 
 				sql ~= " (" ~ 
 					rs::join
 					(
 						", ", 
-						q.values.reduce
+						q.data.reduce
 						(
-							Vector (Vector<string> v, string key, primitive value) use (q, params)
+							Vector (Vector<string> v, primitive value, string key) use (q, params)
 							{
-								if (not q.raw)
+								if (not q.flag_raw)
 								{
 									value = static::toDatabaseValue(q.model_name, key, value);
 								}
@@ -289,16 +289,16 @@ struct DataProvider extends CoreProvider implements DataProviderInterface
 				;
 			
 			/* Add valuse */
-			if (q.values != "") 
+			if (q.data != "") 
 				sql ~= " VALUES (" ~ 
 					rs::join
 					(
 						", ", 
-						q.values.reduce
+						q.data.reduce
 						(
-							Vector (Vector<string> v, string key, primitive value) use (q, params)
+							Vector (Vector<string> v, primitive value, string key) use (q, params)
 							{
-								if (not q.raw)
+								if (not q.flag_raw)
 								{
 									value = static::toDatabaseValue(q.model_name, key, value);
 								}
@@ -325,7 +325,7 @@ struct DataProvider extends CoreProvider implements DataProviderInterface
 			Map params = new Map();
 			
 			string table_name = q.table_name;
-			if (q.prefix_table) table_name = static::getTableName(table_name, provider);
+			if (q.flag_prefix) table_name = static::getTableName(table_name, provider);
 			
 			/* Add from */
 			sql ~= table_name;
@@ -334,16 +334,16 @@ struct DataProvider extends CoreProvider implements DataProviderInterface
 			if (q.table_name_alias != "") sql ~= " AS " ~ q.table_name_alias;
 			
 			/* Add set */
-			if (q.values != "") 
+			if (q.data != "") 
 				sql ~= " SET " ~ 
 					rs::join
 					(
 						", ", 
-						q.values.reduce
+						q.data.reduce
 						(
-							Vector (Vector<string> v, string key, primitive value) use (q, params)
+							Vector (Vector<string> v, primitive value, string key) use (q, params)
 							{
-								if (not q.raw)
+								if (not q.flag_raw)
 								{
 									value = static::toDatabaseValue(q.model_name, key, value);
 								}
@@ -355,12 +355,12 @@ struct DataProvider extends CoreProvider implements DataProviderInterface
 					);
 			
 			/* Add where */
-			if (q.where != "") sql ~= " WHERE " ~ q.where;
+			if (q.where_str != "") sql ~= " WHERE " ~ q.where_str;
 			if (q.where_params != null)
 			{
 				q.where_params.each
 				(
-					void (string key, primitive value) use (params)
+					void (primitive value, string key) use (params)
 					{
 						params.set(key, value);
 					}
@@ -376,7 +376,7 @@ struct DataProvider extends CoreProvider implements DataProviderInterface
 			Map params = new Map();
 			
 			string table_name = q.table_name;
-			if (q.prefix_table) table_name = static::getTableName(table_name, provider);
+			if (q.flag_prefix) table_name = static::getTableName(table_name, provider);
 			
 			/* Add from */
 			sql ~= table_name;
@@ -385,12 +385,12 @@ struct DataProvider extends CoreProvider implements DataProviderInterface
 			if (q.table_name_alias != "") sql ~= " AS " ~ q.table_name_alias;
 			
 			/* Add where */
-			if (q.where != "") sql ~= " WHERE " ~ q.where;
+			if (q.where_str != "") sql ~= " WHERE " ~ q.where_str;
 			if (q.where_params != null)
 			{
 				q.where_params.each
 				(
-					void (string key, primitive value) use (params)
+					void (primitive value, string key) use (params)
 					{
 						params.set(key, value);
 					}
